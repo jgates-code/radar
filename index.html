@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>RADAR • Split Flow Monitor</title>
+<style>
+  :root {
+    --bg-dark: #090d16;
+    --col-bg: #0f172a;
+    --card-bg: #1e293b;
+    --text-main: #f8fafc;
+    --text-dim: #94a3b8;
+    
+    /* Traffic lights */
+    --red: #ef4444;
+    --red-glow: rgba(239, 68, 68, 0.65);
+    --amber: #f59e0b;
+    --green: #10b981;
+    
+    --today-accent: #38bdf8;
+    --tomorrow-accent: #a855f7;
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    user-select: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+
+  body {
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 20px;
+    background: #0b1120;
+    border-bottom: 1px solid #334155;
+    flex-shrink: 0;
+  }
+
+  h1 {
+    font-size: 1.3rem;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: #38bdf8;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .clock {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #cbd5e1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Split Workspace */
+  .split-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .column {
+    display: flex;
+    flex-direction: column;
+    padding: 14px;
+    overflow-y: auto;
+    background-color: var(--col-bg);
+  }
+
+  .column:first-child {
+    border-right: 2px solid #334155;
+  }
+
+  .col-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+    border-bottom: 2px solid #334155;
+    position: sticky;
+    top: 0;
+    background-color: var(--col-bg);
+    z-index: 10;
+  }
+
+  .col-title {
+    font-size: 1.25rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .today-title { color: var(--today-accent); }
+  .tomorrow-title { color: var(--tomorrow-accent); }
+
+  .badge-count {
+    font-size: 0.8rem;
+    background: #334155;
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 12px;
+  }
+
+  /* Bed Cards Flow */
+  .bed-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .bed-card {
+    background: var(--card-bg);
+    border-radius: 10px;
+    padding: 12px;
+    border: 1px solid #334155;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .bed-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .bed-title {
+    font-size: 1.15rem;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    color: #fff;
+  }
+
+  .bed-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .btn-action {
+    background: #334155;
+    border: none;
+    color: #cbd5e1;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .btn-action:hover { background: #475569; }
+  .btn-delete:hover { background: #ef4444; color: #fff; }
+
+  /* 6-Tile Grid per Card */
+  .tile-container {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 6px;
+  }
+
+  .tile {
+    border-radius: 6px;
+    padding: 8px 4px;
+    text-align: center;
+    cursor: pointer;
+    transition: transform 0.08s ease;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-height: 64px;
+    position: relative;
+  }
+
+  .tile:active {
+    transform: scale(0.95);
+  }
+
+  .tile-title {
+    font-size: 0.75rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+  }
+
+  .tile-subtitle {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: capitalize;
+  }
+
+  .tile-time {
+    font-size: 0.62rem;
+    opacity: 0.85;
+    margin-top: 2px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Pulsating Red State */
+  .state-red {
+    background-color: var(--red);
+    color: #fff;
+    animation: radar-pulse 1.8s infinite ease-in-out;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+  }
+
+  @keyframes radar-pulse {
+    0% {
+      box-shadow: 0 0 0 0 var(--red-glow);
+      opacity: 0.92;
+      transform: scale(1);
+    }
+    50% {
+      box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+      opacity: 1;
+      transform: scale(1.02);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+      opacity: 0.92;
+      transform: scale(1);
+    }
+  }
+
+  .state-amber {
+    background-color: var(--amber);
+    color: #1e1b4b;
+    box-shadow: none;
+    transform: none;
+    animation: none;
+  }
+
+  .state-green {
+    background-color: var(--green);
+    color: #064e3b;
+    box-shadow: none;
+    transform: none;
+    animation: none;
+  }
+
+  /* Giant Void-Filling Add Target */
+  .slot-invite-btn {
+    flex-grow: 1;
+    min-height: 140px;
+    margin-top: 8px;
+    border: 3px dashed #334155;
+    border-radius: 12px;
+    background: rgba(30, 41, 59, 0.4);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    gap: 8px;
+  }
+
+  .slot-invite-btn:active {
+    transform: scale(0.98);
+  }
+
+  .slot-today:hover {
+    border-color: var(--today-accent);
+    background: rgba(56, 189, 248, 0.08);
+  }
+
+  .slot-tomorrow:hover {
+    border-color: var(--tomorrow-accent);
+    background: rgba(168, 85, 247, 0.08);
+  }
+
+  .huge-plus-icon {
+    font-size: 4.5rem;
+    font-weight: 200;
+    line-height: 1;
+    transition: transform 0.15s ease;
+  }
+
+  .slot-today .huge-plus-icon { color: var(--today-accent); }
+  .slot-tomorrow .huge-plus-icon { color: var(--tomorrow-accent); }
+
+  .slot-invite-btn:hover .huge-plus-icon {
+    transform: scale(1.15);
+  }
+
+  .slot-invite-text {
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  @media (max-width: 1024px) {
+    .tile-container {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>RADAR <span>• Operational Discharge Flow</span></h1>
+  <div class="clock" id="clock">--:--</div>
+</header>
+
+<div class="split-container">
+  
+  <!-- LEFT: TODAY -->
+  <section class="column" id="colToday">
+    <div class="col-header">
+      <div>
+        <div class="col-title today-title">Today <span class="badge-count" id="countToday">0</span></div>
+        <span style="font-size: 0.75rem; color: var(--text-dim);">Immediate Discharges & AM Bottlenecks</span>
+      </div>
+    </div>
+    
+    <div class="bed-list" id="listToday"></div>
+
+    <div class="slot-invite-btn slot-today" onclick="promptAddBed('today')">
+      <div class="huge-plus-icon">+</div>
+      <div class="slot-invite-text">Tap to Add Discharge for Today</div>
+    </div>
+  </section>
+
+  <!-- RIGHT: TOMORROW -->
+  <section class="column" id="colTomorrow">
+    <div class="col-header">
+      <div>
+        <div class="col-title tomorrow-title">Tomorrow <span class="badge-count" id="countTomorrow">0</span></div>
+        <span style="font-size: 0.75rem; color: var(--text-dim);">Pre-Staged Handovers & 24h Actions</span>
+      </div>
+    </div>
+
+    <div class="bed-list" id="listTomorrow"></div>
+
+    <div class="slot-invite-btn slot-tomorrow" onclick="promptAddBed('tomorrow')">
+      <div class="huge-plus-icon">+</div>
+      <div class="slot-invite-text">Tap to Stage Discharge for Tomorrow</div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  const DISCIPLINES = [
+    {
+      id: "idl",
+      name: "IDL",
+      steps: [
+        { label: "unstarted", class: "state-red" },
+        { label: "Meds on", class: "state-amber" },
+        { label: "complete", class: "state-green" }
+      ]
+    },
+    {
+      id: "meds",
+      name: "MEDS",
+      steps: [
+        { label: "Not started", class: "state-red" },
+        { label: "At pharm", class: "state-amber" },
+        { label: "On ward", class: "state-green" }
+      ]
+    },
+    {
+      id: "ahp",
+      name: "AHP",
+      steps: [
+        { label: "Not requested", class: "state-red" },
+        { label: "requested", class: "state-amber" },
+        { label: "confirmed", class: "state-green" }
+      ]
+    },
+    {
+      id: "poc",
+      name: "POC",
+      steps: [
+        { label: "Not request", class: "state-red" },
+        { label: "Request made", class: "state-amber" },
+        { label: "confirmed", class: "state-green" }
+      ]
+    },
+    {
+      id: "transport",
+      name: "Transport",
+      steps: [
+        { label: "unbooked", class: "state-red" },
+        { label: "Form prefilled", class: "state-amber" },
+        { label: "booked", class: "state-green" }
+      ]
+    },
+    {
+      id: "coordinator",
+      name: "Co-ordinator",
+      steps: [
+        { label: "No checks", class: "state-red" },
+        { label: "confirming", class: "state-amber" },
+        { label: "Final sign off", class: "state-green" }
+      ]
+    }
+  ];
+
+  let beds = [
+    {
+      id: 1,
+      targetDay: "today",
+      name: "Bed 4 (Bay 1)",
+      tiles: DISCIPLINES.map(d => ({ disciplineId: d.id, currentStep: 0, timestamp: getTimeString() }))
+    }
+  ];
+
+  let bedCounter = 2;
+
+  function getTimeString() {
+    const now = new Date();
+    return now.toTimeString().substring(0, 5);
+  }
+
+  function promptAddBed(targetDay) {
+    const label = prompt(`Enter Bed Name for ${targetDay.toUpperCase()}:`, `Bed ${bedCounter}`);
+    if (!label) return;
+
+    beds.push({
+      id: Date.now(),
+      targetDay: targetDay,
+      name: label,
+      tiles: DISCIPLINES.map(d => ({
+        disciplineId: d.id,
+        currentStep: 0,
+        timestamp: getTimeString()
+      }))
+    });
+
+    bedCounter++;
+    render();
+  }
+
+  function cycleTile(bedId, disciplineId) {
+    const bed = beds.find(b => b.id === bedId);
+    if (!bed) return;
+
+    const tile = bed.tiles.find(t => t.disciplineId === disciplineId);
+    if (!tile) return;
+
+    tile.currentStep = (tile.currentStep + 1) % 3;
+    tile.timestamp = getTimeString();
+    render();
+  }
+
+  function toggleDay(bedId) {
+    const bed = beds.find(b => b.id === bedId);
+    if (!bed) return;
+    bed.targetDay = bed.targetDay === "today" ? "tomorrow" : "today";
+    render();
+  }
+
+  function removeBed(bedId) {
+    beds = beds.filter(b => b.id !== bedId);
+    render();
+  }
+
+  function renderColumn(targetDay, containerId, countId) {
+    const container = document.getElementById(containerId);
+    container.innerHTML = "";
+    
+    const dayBeds = beds.filter(b => b.targetDay === targetDay);
+    document.getElementById(countId).innerText = dayBeds.length;
+
+    dayBeds.forEach(bed => {
+      const card = document.createElement("div");
+      card.className = "bed-card";
+
+      const shiftTargetText = targetDay === "today" ? "Move ? Tomorrow" : "? Move to Today";
+
+      card.innerHTML = `
+        <div class="bed-header">
+          <span class="bed-title">${bed.name}</span>
+          <div class="bed-actions">
+            <button class="btn-action" onclick="toggleDay(${bed.id})">${shiftTargetText}</button>
+            <button class="btn-action btn-delete" onclick="removeBed(${bed.id})">&times;</button>
+          </div>
+        </div>
+      `;
+
+      const tileContainer = document.createElement("div");
+      tileContainer.className = "tile-container";
+
+      bed.tiles.forEach(tileState => {
+        const config = DISCIPLINES.find(d => d.id === tileState.disciplineId);
+        const step = config.steps[tileState.currentStep];
+
+        const tile = document.createElement("div");
+        tile.className = `tile ${step.class}`;
+        tile.onclick = () => cycleTile(bed.id, config.id);
+
+        tile.innerHTML = `
+          <div class="tile-title">${config.name}</div>
+          <div class="tile-subtitle">${step.label}</div>
+          <div class="tile-time">${tileState.timestamp}</div>
+        `;
+
+        tileContainer.appendChild(tile);
+      });
+
+      card.appendChild(tileContainer);
+      container.appendChild(card);
+    });
+  }
+
+  function render() {
+    renderColumn("today", "listToday", "countToday");
+    renderColumn("tomorrow", "listTomorrow", "countTomorrow");
+  }
+
+  setInterval(() => {
+    document.getElementById("clock").innerText = getTimeString();
+  }, 1000);
+
+  render();
+</script>
+</body>
+</html>

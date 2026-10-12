@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>RADAR &bull; Split Flow Monitor</title>
+<style>
+  :root {
+    --bg-dark: #090d16;
+    --col-bg: #0f172a;
+    --card-bg: #1e293b;
+    --text-main: #f8fafc;
+    --text-dim: #94a3b8;
+
+    /* Traffic lights */
+    --red: #ef4444;
+    --red-glow: rgba(239, 68, 68, 0.65);
+    --amber: #f59e0b;
+    --green: #10b981;
+
+    --today-accent: #38bdf8;
+    --tomorrow-accent: #a855f7;
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    user-select: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+
+  body {
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 20px;
+    background: #0b1120;
+    border-bottom: 1px solid #334155;
+    flex-shrink: 0;
+  }
+
+  h1 {
+    font-size: 1.3rem;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: #38bdf8;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .clock {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #cbd5e1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Split Workspace */
+  .split-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .column {
+    display: flex;
+    flex-direction: column;
+    padding: 14px;
+    overflow-y: auto;
+    background-color: var(--col-bg);
+  }
+
+  .column:first-child {
+    border-right: 2px solid #334155;
+  }
+
+  .col-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+    border-bottom: 2px solid #334155;
+    position: sticky;
+    top: 0;
+    background-color: var(--col-bg);
+    z-index: 10;
+  }
+
+  .col-title {
+    font-size: 1.25rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .today-title { color: var(--today-accent); }
+  .tomorrow-title { color: var(--tomorrow-accent); }
+
+  .badge-count {
+    font-size: 0.8rem;
+    background: #334155;
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 12px;
+  }
+
+  /* Bed Cards Flow */
+  .bed-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .bed-card {
+    background: var(--card-bg);
+    border-radius: 10px;
+    padding: 12px;
+    border: 1px solid #334155;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: opacity 0.4s ease;
+  }
+
+  /* Dimmed state when all tiles are green */
+  .bed-card.completed-dim {
+    opacity: 0.45;
+  }
+  .bed-card.completed-dim:hover {
+    opacity: 0.85;
+  }
+
+  .bed-top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .bed-main-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .bed-badge {
+    background: #0d1424;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 0 16px;
+    font-size: 3rem;
+    font-weight: 900;
+    line-height: 1.2;
+    color: #ffffff;
+    letter-spacing: 1px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 90px;
+    flex-shrink: 0;
+  }
+
+  .btn-action {
+    background: #334155;
+    border: none;
+    color: #cbd5e1;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .btn-action:hover { background: #475569; }
+  .btn-delete:hover { background: #ef4444; color: #fff; }
+
+  .tile-container {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 5px;
+    flex-grow: 1;
+    min-width: 0; /* Prevents grid blowout */
+  }
+
+  .tile {
+    border-radius: 6px;
+    padding: 6px 2px;
+    text-align: center;
+    cursor: pointer;
+    transition: transform 0.08s ease;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-height: 72px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .tile:active {
+    transform: scale(0.95);
+  }
+
+  /* Safer scaled font sizes for tight fits */
+  .tile-title {
+    font-size: 0.7rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.2px;
+    margin-bottom: 2px;
+    white-space: nowrap;
+  }
+
+  .tile-subtitle {
+    font-size: 0.64rem;
+    font-weight: 600;
+    text-transform: capitalize;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+
+  .tile-time {
+    font-size: 0.58rem;
+    opacity: 0.85;
+    margin-top: 2px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .state-red {
+    background-color: var(--red);
+    color: #fff;
+    animation: radar-pulse 1.8s infinite ease-in-out;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+  }
+
+  @keyframes radar-pulse {
+    0% {
+      box-shadow: 0 0 0 0 var(--red-glow);
+      opacity: 0.92;
+      transform: scale(1);
+    }
+    50% {
+      box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+      opacity: 1;
+      transform: scale(1.02);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+      opacity: 0.92;
+      transform: scale(1);
+    }
+  }
+
+  .state-amber {
+    background-color: var(--amber);
+    color: #1e1b4b;
+    box-shadow: none;
+    transform: none;
+    animation: none;
+  }
+
+  .state-green {
+    background-color: var(--green);
+    color: #064e3b;
+    box-shadow: none;
+    transform: none;
+    animation: none;
+  }
+
+  .slot-invite-btn {
+    flex-grow: 1;
+    min-height: 140px;
+    margin-top: 8px;
+    border: 3px dashed #334155;
+    border-radius: 12px;
+    background: rgba(30, 41, 59, 0.4);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    gap: 8px;
+  }
+
+  .slot-invite-btn:active {
+    transform: scale(0.98);
+  }
+
+  .slot-today:hover {
+    border-color: var(--today-accent);
+    background: rgba(56, 189, 248, 0.08);
+  }
+
+  .slot-tomorrow:hover {
+    border-color: var(--tomorrow-accent);
+    background: rgba(168, 85, 247, 0.08);
+  }
+
+  .huge-plus-icon {
+    font-size: 4.5rem;
+    font-weight: 200;
+    line-height: 1;
+    transition: transform 0.15s ease;
+  }
+
+  .slot-today .huge-plus-icon { color: var(--today-accent); }
+  .slot-tomorrow .huge-plus-icon { color: var(--tomorrow-accent); }
+
+  .slot-invite-btn:hover .huge-plus-icon {
+    transform: scale(1.15);
+  }
+
+  .slot-invite-text {
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  /* Xbox Achievement Popup Notification */
+  #achievement-toast {
+    position: fixed;
+    bottom: -120px;
+    left: 24px;
+    background: linear-gradient(135deg, #0b1120 0%, #1e293b 100%);
+    border: 2px solid #10b981;
+    border-radius: 8px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6), 0 0 15px rgba(16, 185, 129, 0.4);
+    padding: 12px 18px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    z-index: 1000;
+    transition: bottom 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    max-width: 440px;
+  }
+
+  #achievement-toast.show {
+    bottom: 24px;
+  }
+
+  .ach-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    border: 2px solid #10b981;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .ach-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .ach-name {
+    font-size: 0.9rem;
+    font-weight: 800;
+    color: #ffffff;
+  }
+
+  /* Bed number picker */
+  #picker {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    z-index: 99;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.25s ease, visibility 0s linear 0.25s;
+  }
+  #picker.on {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.25s ease, visibility 0s;
+  }
+  .sheet {
+    background: var(--col-bg);
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 20px;
+    max-width: 560px;
+    width: 100%;
+    transform: translateY(14px) scale(0.98);
+    transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  #picker.on .sheet { transform: none; }
+  .sheet h2 { font-size: 1.1rem; margin-bottom: 14px; }
+  .pgrid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+  }
+  .pgrid button {
+    background: var(--card-bg);
+    color: var(--text-main);
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 14px 0;
+    font-size: 1.3rem;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  .pgrid button:disabled { opacity: 0.25; cursor: not-allowed; }
+  .pcancel {
+    margin-top: 14px;
+    width: 100%;
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 12px;
+    font-size: 1rem;
+    cursor: pointer;
+  }
+
+  @media (max-width: 1024px) {
+    .tile-container {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>RADAR &bull; Split Flow Monitor</h1>
+  <div class="clock" id="clock">--:--</div>
+</header>
+
+<div class="split-container">
+
+  <!-- LEFT: TODAY -->
+  <section class="column" id="colToday">
+    <div class="col-header">
+      <div>
+        <div class="col-title today-title">Today <span class="badge-count" id="countToday">0</span></div>
+        <span style="font-size: 0.75rem; color: var(--text-dim);">Immediate Discharges &amp; AM Bottlenecks</span>
+      </div>
+    </div>
+
+    <div class="bed-list" id="listToday"></div>
+
+    <div class="slot-invite-btn slot-today" onclick="openPicker('today')">
+      <div class="huge-plus-icon">+</div>
+      <div class="slot-invite-text">Tap to Add Discharge for Today</div>
+    </div>
+  </section>
+
+  <!-- RIGHT: TOMORROW -->
+  <section class="column" id="colTomorrow">
+    <div class="col-header">
+      <div>
+        <div class="col-title tomorrow-title">Tomorrow <span class="badge-count" id="countTomorrow">0</span></div>
+        <span style="font-size: 0.75rem; color: var(--text-dim);">Pre-Staged Handovers &amp; 24h Actions</span>
+      </div>
+    </div>
+
+    <div class="bed-list" id="listTomorrow"></div>
+
+    <div class="slot-invite-btn slot-tomorrow" onclick="openPicker('tomorrow')">
+      <div class="huge-plus-icon">+</div>
+      <div class="slot-invite-text">Tap to Stage Discharge for Tomorrow</div>
+    </div>
+  </section>
+
+</div>
+
+<div id="picker">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <h2 id="ptitle"></h2>
+    <div class="pgrid" id="pgrid"></div>
+    <button type="button" class="pcancel" id="pcancel" onclick="closePicker()">Cancel</button>
+  </div>
+</div>
+
+<!-- Xbox Achievement Toast Container -->
+<div id="achievement-toast">
+  <div class="ach-icon">
+    <svg viewBox="0 0 100 100" width="32" height="32">
+      <circle cx="50" cy="50" r="48" fill="#000" stroke="#10b981" stroke-width="2"/>
+      <path d="M 50 2 A 48 48 0 0 1 95 35" fill="none" stroke="#6b7280" stroke-width="10" stroke-linecap="round"/>
+      <path d="M 98 65 A 48 48 0 0 1 50 98" fill="none" stroke="#6b7280" stroke-width="10" stroke-linecap="round"/>
+      <path d="M 2 65 A 48 48 0 0 1 5 35" fill="none" stroke="#6b7280" stroke-width="10" stroke-linecap="round"/>
+      <path d="M 50 2 A 48 48 0 0 0 5 35" fill="none" stroke="#10b981" stroke-width="10" stroke-linecap="round"/>
+      <g fill="#10b981" transform="translate(28, 28) scale(0.44)">
+        <path d="M20 2h50v20c0 14-11 25-25 25S20 36 20 22V2z"/>
+        <path d="M35 47h25v15H35z"/>
+        <path d="M25 62h45v10H25z"/>
+        <path d="M8 8h12v12C20 26 14 32 8 32V8z" fill="none" stroke="#10b981" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M92 8H80v12c0 6 6 12 12 12V8z" fill="none" stroke="#10b981" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+      </g>
+    </svg>
+  </div>
+  <div class="ach-text">
+    <div class="ach-name">Achievement Unlocked: Discharge Ready</div>
+  </div>
+</div>
+
+<script>
+  const BED_NUMBERS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15];
+
+  const DISCIPLINES = [
+    {
+      id: "idl",
+      name: "IDL",
+      steps: [
+        { label: "unstarted", class: "state-red" },
+        { label: "Meds on", class: "state-amber" },
+        { label: "complete", class: "state-green" }
+      ]
+    },
+    {
+      id: "meds",
+      name: "MEDS",
+      steps: [
+        { label: "Not started", class: "state-red" },
+        { label: "At pharm", class: "state-amber" },
+        { label: "On ward", class: "state-green" }
+      ]
+    },
+    {
+      id: "ahp",
+      name: "AHP",
+      steps: [
+        { label: "Not requested", class: "state-red" },
+        { label: "requested", class: "state-amber" },
+        { label: "confirmed", class: "state-green" }
+      ]
+    },
+    {
+      id: "poc",
+      name: "POC",
+      steps: [
+        { label: "Not request", class: "state-red" },
+        { label: "Request made", class: "state-amber" },
+        { label: "confirmed", class: "state-green" }
+      ]
+    },
+    {
+      id: "transport",
+      name: "Transport",
+      steps: [
+        { label: "unbooked", class: "state-red" },
+        { label: "Form prefilled", class: "state-amber" },
+        { label: "booked", class: "state-green" }
+      ]
+    },
+    {
+      id: "coordinator",
+      name: "Co-ordinator",
+      steps: [
+        { label: "No checks", class: "state-red" },
+        { label: "confirming", class: "state-amber" },
+        { label: "Final sign off", class: "state-green" }
+      ]
+    }
+  ];
+
+  let beds = [];
+  let pickDay = null;
+
+  function getTimeString() {
+    const now = new Date();
+    return now.toTimeString().substring(0, 5);
+  }
+
+  function pad(n) {
+    return String(n).padStart(2, "0");
+  }
+
+  function openPicker(targetDay) {
+    pickDay = targetDay;
+    document.getElementById("ptitle").textContent =
+      "Add to " + (targetDay === "today" ? "Today" : "Tomorrow");
+
+    const grid = document.getElementById("pgrid");
+    grid.innerHTML = "";
+    
+    const used = new Set(beds.map(b => Number(b.bed)));
+
+    BED_NUMBERS.forEach(n => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = n;
+      btn.disabled = used.has(n);
+      btn.addEventListener("click", () => addBed(n));
+      grid.appendChild(btn);
+    });
+
+    document.getElementById("picker").classList.add("on");
+  }
+
+  function closePicker() {
+    document.getElementById("picker").classList.remove("on");
+  }
+
+  function addBed(n) {
+    const now = getTimeString();
+    beds.push({
+      id: Date.now(),
+      targetDay: pickDay,
+      bed: Number(n),
+      tiles: DISCIPLINES.map(d => ({
+        disciplineId: d.id,
+        currentStep: 0,
+        timestamp: now
+      }))
+    });
+    closePicker();
+    render();
+  }
+
+  document.getElementById("picker").addEventListener("click", (e) => {
+    if (e.target.id === "picker") {
+      closePicker();
+    }
+  });
+
+  function cycleTile(bedId, disciplineId) {
+    const bed = beds.find(b => b.id === bedId);
+    if (!bed) return;
+
+    const tile = bed.tiles.find(t => t.disciplineId === disciplineId);
+    if (!tile) return;
+
+    const wasAlreadyComplete = bed.tiles.every(t => t.currentStep === 2);
+
+    tile.currentStep = (tile.currentStep + 1) % 3;
+    tile.timestamp = getTimeString();
+    
+    const allGreen = bed.tiles.every(t => t.currentStep === 2);
+
+    if (allGreen && !wasAlreadyComplete) {
+      triggerAchievement();
+    }
+
+    render();
+  }
+
+  function triggerAchievement() {
+    const toast = document.getElementById("achievement-toast");
+    toast.classList.add("show");
+
+    setTimeout(() => {
+      toast.classList.remove("show");
+    }, 4000);
+  }
+
+  function toggleDay(bedId) {
+    const bed = beds.find(b => b.id === bedId);
+    if (!bed) return;
+    bed.targetDay = bed.targetDay === "today" ? "tomorrow" : "today";
+    render();
+  }
+
+  function removeBed(bedId) {
+    beds = beds.filter(b => b.id !== bedId);
+    render();
+  }
+
+  function renderColumn(targetDay, containerId, countId) {
+    const container = document.getElementById(containerId);
+    container.innerHTML = "";
+
+    const dayBeds = beds
+      .filter(b => b.targetDay === targetDay)
+      .sort((a, b) => Number(a.bed) - Number(b.bed));
+
+    document.getElementById(countId).innerText = dayBeds.length;
+
+    dayBeds.forEach(bed => {
+      const card = document.createElement("div");
+      card.className = "bed-card";
+
+      const allGreen = bed.tiles.every(t => t.currentStep === 2);
+      if (allGreen) {
+        card.classList.add("completed-dim");
+      }
+
+      const shiftTargetText = targetDay === "today" ? "Move &rarr; Tomorrow" : "&larr; Move to Today";
+
+      card.innerHTML = `
+        <div class="bed-top-row">
+          <button type="button" class="btn-action btn-move" onclick="toggleDay(${bed.id})">${shiftTargetText}</button>
+          <button type="button" class="btn-action btn-delete" onclick="removeBed(${bed.id})">&times;</button>
+        </div>
+        <div class="bed-main-content">
+          <span class="bed-badge">${pad(bed.bed)}</span>
+          <div class="tile-container" id="tiles-${bed.id}"></div>
+        </div>
+      `;
+
+      const tileContainer = card.querySelector('.tile-container');
+
+      bed.tiles.forEach(tileState => {
+        const config = DISCIPLINES.find(d => d.id === tileState.disciplineId);
+        const step = config.steps[tileState.currentStep];
+
+        const tile = document.createElement("div");
+        tile.className = `tile ${step.class}`;
+        tile.onclick = () => cycleTile(bed.id, config.id);
+
+        tile.innerHTML = `
+          <div class="tile-title">${config.name}</div>
+          <div class="tile-subtitle">${step.label}</div>
+          <div class="tile-time">${tileState.timestamp}</div>
+        `;
+
+        tileContainer.appendChild(tile);
+      });
+
+      container.appendChild(card);
+    });
+  }
+
+  function render() {
+    renderColumn("today", "listToday", "countToday");
+    renderColumn("tomorrow", "listTomorrow", "countTomorrow");
+  }
+
+  setInterval(() => {
+    document.getElementById("clock").innerText = getTimeString();
+  }, 1000);
+
+  render();
+</script>
+</body>
+</html>

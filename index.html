@@ -1,0 +1,1298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>RADAR &bull; Split Flow Monitor</title>
+<style>
+  :root {
+    --bg-dark: #090d16;
+    --col-bg: #0f172a;
+    --card-bg: #1e293b;
+    --text-main: #f8fafc;
+    --text-dim: #94a3b8;
+
+    /* Traffic lights */
+    --red: #ef4444;
+    --red-glow: rgba(239, 68, 68, 0.65);
+    --amber: #f59e0b;
+    --green: #10b981;
+
+    --today-accent: #38bdf8;
+    --tomorrow-accent: #a855f7;
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    user-select: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+
+  body {
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 20px;
+    background: #0b1120;
+    border-bottom: 1px solid #334155;
+    flex-shrink: 0;
+  }
+
+  h1 {
+    font-size: 1.3rem;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: #38bdf8;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .clock {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #cbd5e1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Today's tally in the header: resets at midnight or when the page reloads. Nothing is saved. */
+  .day-counts { display: flex; gap: 8px; align-items: center; }
+  .dc {
+    display: flex; align-items: baseline; gap: 6px;
+    padding: 4px 11px; border-radius: 999px;
+    background: #1e293b; border: 1px solid #334155;
+    color: #cbd5e1; font-size: 0.85rem; font-weight: 700; white-space: nowrap;
+  }
+  .dc b { font-size: 1.2rem; font-variant-numeric: tabular-nums; display: inline-block; }
+  /* Home is the number that matters: bigger at rest, and a proper moment when it goes up */
+  .dc-home { padding: 2px 14px 2px 12px; border-color: #10b981; }
+  .dc-home b { font-size: 1.9rem; line-height: 1; text-shadow: 0 0 10px rgba(16, 185, 129, 0.35); }
+  .dc-home.bump { animation: none; }
+  .dc-home.bump b { animation: home-swell 2.2s ease-out; }
+  .dc-home.bump { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6); animation: home-ring 2.2s ease-out; }
+  @keyframes home-swell {
+    0%   { transform: scale(1); }
+    15%  { transform: scale(2.1); text-shadow: 0 0 22px rgba(16, 185, 129, 0.95); }
+    60%  { transform: scale(1.6); text-shadow: 0 0 18px rgba(16, 185, 129, 0.8); }
+    100% { transform: scale(1); text-shadow: 0 0 10px rgba(16, 185, 129, 0.35); }
+  }
+  @keyframes home-ring {
+    0%   { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); background: #1e293b; }
+    20%  { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); background: #064e3b; }
+    100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); background: #1e293b; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dc-home.bump, .dc-home.bump b { animation: none; }
+  }
+  .dc-home b { color: #10b981; }
+  .dc-ward b { color: #f472b6; }
+  .dc-failed b { color: #ef4444; }
+  button.dc { cursor: pointer; font-family: inherit; }
+  button.dc:active { transform: scale(0.96); }
+  /* Tap a count to correct it: a central pop-up */
+  .dc-modal {
+    position: fixed; inset: 0; z-index: 1000;
+    display: none; align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, 0.6);
+  }
+  .dc-modal.on { display: flex; }
+  .dc-panel {
+    background: #0f172a; border: 2px solid #475569; border-radius: 16px;
+    padding: 22px 26px; text-align: center;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+    min-width: 300px;
+  }
+  .dc-edit-label { font-size: 1.1rem; color: #cbd5e1; font-weight: 800; margin-bottom: 14px; }
+  .dc-edit-row { display: flex; align-items: center; justify-content: center; gap: 18px; }
+  .dc-panel button {
+    min-width: 72px; min-height: 72px; border: none; border-radius: 14px;
+    background: #334155; color: #fff; font-size: 2.2rem; font-weight: 800; cursor: pointer;
+  }
+  .dc-panel button:active { background: #475569; transform: scale(0.96); }
+  .dc-edit-val { min-width: 70px; font-size: 3rem; font-weight: 900; color: #fff; font-variant-numeric: tabular-nums; }
+  .dc-panel .dc-done {
+    margin-top: 16px; width: 100%; min-height: 52px; font-size: 1.05rem;
+    background: #1e293b; border: 1px solid #475569;
+  }
+  .dc-panel .dc-hint { margin-top: 10px; font-size: 0.75rem; color: #94a3b8; }
+  .dc.bump { animation: dc-bump 0.6s ease; }
+  @keyframes dc-bump { 0% { transform: scale(1); } 40% { transform: scale(1.2); } 100% { transform: scale(1); } }
+
+  /* Split Workspace */
+  .split-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .column {
+    display: flex;
+    flex-direction: column;
+    padding: 14px;
+    overflow-y: auto;
+    background-color: var(--col-bg);
+  }
+
+  .column:first-child {
+    border-right: 2px solid #334155;
+  }
+
+  .col-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+    border-bottom: 2px solid #334155;
+    position: sticky;
+    top: 0;
+    background-color: var(--col-bg);
+    z-index: 10;
+  }
+
+  .col-title {
+    font-size: 1.25rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .today-title { color: var(--today-accent); }
+  .tomorrow-title { color: var(--tomorrow-accent); }
+
+  .badge-count {
+    font-size: 0.8rem;
+    background: #334155;
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 12px;
+  }
+
+  /* Bed Cards Flow */
+  .bed-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .bed-card {
+    background: var(--card-bg);
+    border-radius: 10px;
+    padding: 12px;
+    border: 1px solid #334155;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: opacity 0.4s ease;
+  }
+
+  /* Dimmed state when all tiles are green */
+  .bed-card.completed-dim {
+    opacity: 0.45;
+  }
+  .bed-card.completed-dim:hover {
+    opacity: 0.85;
+  }
+
+  .bed-top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .bed-main-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .bed-badge {
+    background: #0d1424;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 0 16px;
+    font-size: 3rem;
+    font-weight: 900;
+    line-height: 1.2;
+    color: #ffffff;
+    letter-spacing: 1px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 90px;
+    flex-shrink: 0;
+  }
+
+  .btn-action {
+    background: #334155;
+    border: none;
+    color: #cbd5e1;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .btn-action:hover { background: #475569; }
+  .btn-delete:hover { background: #ef4444; color: #fff; }
+
+  .tile-container {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 6px;
+    flex-grow: 1;
+  }
+
+  .tile {
+    border-radius: 6px;
+    padding: 8px 4px;
+    text-align: center;
+    cursor: pointer;
+    transition: transform 0.08s ease;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-height: 72px;
+    position: relative;
+  }
+
+  .tile:active {
+    transform: scale(0.95);
+  }
+
+  .tile-title {
+    font-size: 0.75rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+  }
+
+  .tile-subtitle {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: capitalize;
+  }
+
+  .tile-time {
+    font-size: 0.62rem;
+    opacity: 0.85;
+    margin-top: 2px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Red: the red slowly fades in and out on every red tile. Text stays solid white throughout.
+     Reds stuck past STALE_MINUTES in the Today column fade twice as fast. */
+  .state-red {
+    background-color: rgba(220, 38, 38, 1);
+    color: #fff;
+    border: 2px solid transparent;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+    animation: red-fade 2.4s ease-in-out infinite;
+  }
+  .state-red.stale { animation-duration: 1.2s; }
+  @keyframes red-fade {
+    0%, 100% { background-color: rgba(220, 38, 38, 1); }
+    50%      { background-color: rgba(220, 38, 38, 0); }
+  }
+
+  .state-amber {
+    background-color: var(--amber);
+    color: #1e1b4b;
+    box-shadow: none;
+    transform: none;
+    animation: none;
+  }
+
+  .state-green {
+    background-color: var(--green);
+    color: #064e3b;
+    box-shadow: none;
+    transform: none;
+    animation: none;
+  }
+
+  .slot-invite-btn {
+    flex-grow: 1;
+    min-height: 140px;
+    margin-top: 8px;
+    border: 3px dashed #334155;
+    border-radius: 12px;
+    background: rgba(30, 41, 59, 0.4);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    gap: 8px;
+  }
+
+  .slot-invite-btn:active {
+    transform: scale(0.98);
+  }
+
+  .slot-today:hover {
+    border-color: var(--today-accent);
+    background: rgba(56, 189, 248, 0.08);
+  }
+
+  .slot-tomorrow:hover {
+    border-color: var(--tomorrow-accent);
+    background: rgba(168, 85, 247, 0.08);
+  }
+
+  .huge-plus-icon {
+    font-size: 4.5rem;
+    font-weight: 200;
+    line-height: 1;
+    transition: transform 0.15s ease;
+  }
+
+  .slot-today .huge-plus-icon { color: var(--today-accent); }
+  .slot-tomorrow .huge-plus-icon { color: var(--tomorrow-accent); }
+
+  .slot-invite-btn:hover .huge-plus-icon {
+    transform: scale(1.15);
+  }
+
+  .slot-invite-text {
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  /* "Discharge successful?" — sits over its own card only */
+  .bed-card { position: relative; }
+  .ask-panel {
+    position: absolute;
+    inset: 0;
+    border-radius: 10px;
+    border: 2px solid var(--green);
+    background: rgba(9, 13, 22, 0.98);
+    box-shadow: 0 0 18px rgba(16, 185, 129, 0.35);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 14px;
+    z-index: 5;
+  }
+  .ask-head { flex-shrink: 0; text-align: center; min-width: 110px; }
+  .ask-bed { font-size: 2.4rem; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
+  .ask-q { font-size: 0.9rem; font-weight: 800; margin-top: 4px; }
+  .ask-btns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; flex: 1; min-width: 0; }
+  .ask-btns button {
+    border: none;
+    border-radius: 8px;
+    padding: 12px 8px;
+    font-size: 1.05rem;
+    font-weight: 800;
+    cursor: pointer;
+    color: #fff;
+    min-height: 70px;
+  }
+  .ask-btns button:active { transform: scale(0.97); }
+  .ask-btns small { display: block; font-size: 0.75rem; font-weight: 600; opacity: 0.85; margin-top: 3px; }
+  .c-yes { background: var(--green); color: #064e3b !important; }
+  .c-no { background: var(--red); }
+
+
+  /* "Yes, gone home": the bed number does one celebratory spin, then the card bows out */
+  .ask-bed.spin { display: inline-block; animation: bed-spin 0.6s cubic-bezier(0.3, 0.7, 0.3, 1); }
+  @keyframes bed-spin {
+    0%   { transform: rotate(0deg) scale(1); }
+    50%  { transform: rotate(180deg) scale(1.4); }
+    100% { transform: rotate(360deg) scale(1); }
+  }
+  .bed-card.leaving {
+    transition: opacity 0.3s ease 0.55s, transform 0.3s ease 0.55s;
+    opacity: 0;
+    transform: scale(0.96);
+    pointer-events: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .state-red, .state-red.stale, .ask-bed.spin { animation: none; }
+  }
+
+
+  /* Mr Green walks home */
+  .mg-stage {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    height: 270px;
+    pointer-events: none;
+    z-index: 900;
+    background: linear-gradient(to top, rgba(9, 13, 22, 0.85), rgba(9, 13, 22, 0));
+  }
+  .mg-house { position: absolute; right: 24px; bottom: 10px; }
+  .mg-house .mg-door, .mg-house .mg-window { transition: fill 0.6s ease; }
+  .mg-house.lit .mg-door, .mg-house.lit .mg-window { fill: #fbbf24; }
+  .mg-house.lit svg { filter: drop-shadow(0 0 14px rgba(251, 191, 36, 0.7)); }
+  .mg-post { position: absolute; left: 0; bottom: 6px; opacity: 0; transition: opacity 0.3s ease; }
+  .mg-post.on { opacity: 1; }
+  .mg-walker { position: absolute; left: 0; bottom: 6px; width: 288px; }
+  .mg-img { display: block; max-height: 206px; max-width: 288px; }
+
+  .mg-bubble {
+    position: absolute;
+    font-weight: 900;
+    font-size: 1rem;
+    padding: 6px 12px;
+    border-radius: 12px;
+    white-space: nowrap;
+  }
+  .mg-bubble::after {
+    content: "";
+    position: absolute;
+    bottom: -8px;
+    border: 8px solid transparent;
+    border-bottom: 0;
+  }
+  .mg-tag { left: 26px; bottom: 216px; background: #10b981; color: #064e3b; }
+  .mg-tag::after { left: 40px; border-top-color: #10b981; }
+  .mg-speech, .mg-dogspeech {
+    background: #f8fafc;
+    color: #0f172a;
+    opacity: 0;
+    transform: translateY(6px) scale(0.9);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+  }
+  .mg-speech { left: 122px; bottom: 168px; }
+  .mg-speech::after { left: 14px; border-top-color: #f8fafc; }
+  .mg-dogspeech { left: 248px; bottom: 122px; }
+  .mg-dogspeech::after { left: 10px; border-top-color: #f8fafc; }
+  .mg-speech.on, .mg-dogspeech.on { opacity: 1; transform: none; }
+
+  /* thin white outline so the black campaign line-work shows on a dark board */
+  .mg-figure { display: block; overflow: visible; filter: drop-shadow(0 0 1.2px #fff) drop-shadow(0 0 1.2px #fff) drop-shadow(0 0 0.6px #fff); }
+  .mg-figure g, .mg-figure line, .mg-figure path { transform-box: fill-box; }
+  .mg-man { animation: mg-bob 0.6s ease-in-out infinite; }
+  .mg-leg { transform-origin: top center; }
+  .mg-leg-a { animation: mg-step 1.2s ease-in-out infinite; }
+  .mg-leg-b { animation: mg-step 1.2s ease-in-out infinite reverse; }
+  .mg-stick { transform-origin: top center; animation: mg-stick 1.2s ease-in-out infinite; }
+  .mg-dleg { transform-origin: top center; }
+  .mg-dleg-a { animation: mg-step 0.5s ease-in-out infinite; }
+  .mg-dleg-b { animation: mg-step 0.5s ease-in-out infinite reverse; }
+  .mg-dog { animation: mg-bob 0.25s ease-in-out infinite; }
+  .mg-tail { transform-origin: bottom center; animation: mg-wag 0.3s ease-in-out infinite alternate; }
+  .mg-head, .mg-dog-rear, .mg-dog-body, .mg-dog-head, .mg-arm-back { transition: transform 0.35s ease; }
+  .mg-arm-back { transform-origin: top right; }
+  .mg-head { transform-origin: bottom center; }
+  .mg-arm-back { animation: mg-swing 1.2s ease-in-out infinite; }
+  .mg-dog-head { transform-origin: left center; }
+  .mg-dog-body { transform-origin: right center; }
+  .mg-watch { opacity: 0; transition: opacity 0.2s ease; }
+
+  /* stopped: legs and bobbing pause, the tail keeps wagging */
+  .mg-paused .mg-leg, .mg-paused .mg-stick, .mg-paused .mg-dleg, .mg-paused .mg-arm-back,
+  .mg-paused .mg-man, .mg-paused .mg-dog { animation-play-state: paused; }
+
+  /* waves to the team */
+  .mg-waving .mg-arm-back { animation: mg-wave 0.4s ease-in-out infinite alternate; }
+  .mg-waving .mg-head { transform: rotate(-6deg); }
+  /* checks his watch */
+  .mg-watching .mg-arm-back { animation: none; transform: rotate(100deg) translate(4px, 2px); }
+  .mg-watching .mg-head { transform: rotate(-8deg); }
+  .mg-watching .mg-watch { opacity: 1; }
+  /* dog sits */
+  .mg-sit .mg-dog-rear { transform: translateY(14px) scaleY(0.5); }
+  .mg-sit .mg-dog-body { transform: rotate(-16deg); }
+  /* dog sniffs */
+  .mg-sniff .mg-dog-head { animation: mg-sniff 0.35s ease-in-out infinite alternate; }
+  /* a wee jig */
+  .mg-jig .mg-man { animation: mg-jig 0.35s ease-in-out 4; }
+  .mg-jig .mg-head { transform: rotate(8deg); }
+  /* zoomies: everything moves faster, the lead pulls tight */
+  .mg-zoomies .mg-leg-a, .mg-zoomies .mg-leg-b, .mg-zoomies .mg-stick { animation-duration: 0.45s; }
+  .mg-zoomies .mg-dleg-a, .mg-zoomies .mg-dleg-b { animation-duration: 0.2s; }
+  .mg-zoomies .mg-dog { transform: translateX(10px); }
+  .mg-zoomies .mg-lead { d: path("M110 102 Q160 112 216 112"); }
+
+  @keyframes mg-step { 0%, 100% { transform: rotate(14deg); } 50% { transform: rotate(-14deg); } }
+  @keyframes mg-stick { 0%, 100% { transform: rotate(-6deg); } 50% { transform: rotate(8deg); } }
+  @keyframes mg-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+  @keyframes mg-wag { from { transform: rotate(-12deg); } to { transform: rotate(16deg); } }
+  @keyframes mg-swing { 0%, 100% { transform: rotate(-10deg); } 50% { transform: rotate(10deg); } }
+  @keyframes mg-wave { from { transform: rotate(105deg); } to { transform: rotate(140deg); } }
+  /* looks up at the sky */
+  .mg-looking .mg-head { transform: rotate(-14deg) translateY(-2px); }
+  /* dog bounces with excitement */
+  .mg-doghop .mg-dog { animation: mg-doghop 0.32s ease-in-out 4; }
+  @keyframes mg-doghop { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
+  @keyframes mg-sniff { from { transform: rotate(14deg) translate(0, 6px); } to { transform: rotate(22deg) translate(1px, 9px); } }
+  @keyframes mg-jig { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+  @keyframes mg-jig { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+  @keyframes mg-jig { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+
+  /* Bed number picker */
+  #picker {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    z-index: 99;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.25s ease, visibility 0s linear 0.25s;
+  }
+  #picker.on {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.25s ease, visibility 0s;
+  }
+  .sheet {
+    background: var(--col-bg);
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 20px;
+    max-width: 560px;
+    width: 100%;
+    transform: translateY(14px) scale(0.98);
+    transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  #picker.on .sheet { transform: none; }
+  .sheet h2 { font-size: 1.1rem; margin-bottom: 14px; }
+  .pgrid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+  }
+  .pgrid button {
+    background: var(--card-bg);
+    color: var(--text-main);
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 14px 0;
+    font-size: 1.3rem;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  .pgrid button:disabled { opacity: 0.25; cursor: not-allowed; }
+  .pcancel {
+    margin-top: 14px;
+    width: 100%;
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 12px;
+    font-size: 1rem;
+    cursor: pointer;
+  }
+
+  @media (max-width: 1024px) {
+    .tile-container {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>RADAR &bull; Split Flow Monitor</h1>
+  <div style="display:flex;align-items:center;gap:16px">
+    <div class="day-counts" aria-live="polite">
+      <button type="button" class="dc dc-home" id="dc-home" aria-label="Home today, tap to correct">Home today <b>0</b></button>
+      <button type="button" class="dc dc-failed" id="dc-failed" aria-label="Didn't happen, tap to correct">Didn't happen <b>0</b></button>
+    </div>
+    <div class="clock" id="clock">--:--</div>
+  </div>
+</header>
+
+<div class="split-container">
+
+  <!-- LEFT: TODAY -->
+  <section class="column" id="colToday">
+    <div class="col-header">
+      <div>
+        <div class="col-title today-title">Today <span class="badge-count" id="countToday">0</span></div>
+        <span style="font-size: 0.75rem; color: var(--text-dim);">Immediate Discharges &amp; AM Bottlenecks</span>
+      </div>
+    </div>
+
+    <div class="bed-list" id="listToday"></div>
+
+    <div class="slot-invite-btn slot-today" onclick="openPicker('today')">
+      <div class="huge-plus-icon">+</div>
+      <div class="slot-invite-text">Tap to Add Discharge for Today</div>
+    </div>
+  </section>
+
+  <!-- RIGHT: TOMORROW -->
+  <section class="column" id="colTomorrow">
+    <div class="col-header">
+      <div>
+        <div class="col-title tomorrow-title">Tomorrow <span class="badge-count" id="countTomorrow">0</span></div>
+        <span style="font-size: 0.75rem; color: var(--text-dim);">Pre-Staged Handovers &amp; 24h Actions</span>
+      </div>
+    </div>
+
+    <div class="bed-list" id="listTomorrow"></div>
+
+    <div class="slot-invite-btn slot-tomorrow" onclick="openPicker('tomorrow')">
+      <div class="huge-plus-icon">+</div>
+      <div class="slot-invite-text">Tap to Stage Discharge for Tomorrow</div>
+    </div>
+  </section>
+
+</div>
+
+<div id="picker">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <h2 id="ptitle"></h2>
+    <div class="pgrid" id="pgrid"></div>
+    <button type="button" class="pcancel" id="pcancel" onclick="closePicker()">Cancel</button>
+  </div>
+</div>
+
+<!-- Xbox Achievement Toast Container -->
+<script>
+  const BED_NUMBERS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15];
+
+  // Minutes a tile can stay red in the Today column before it fades faster (stuck).
+  const STALE_MINUTES = 120;
+
+  const DISCIPLINES = [
+    {
+      id: "idl",
+      name: "IDL",
+      steps: [
+        { label: "unstarted", class: "state-red" },
+        { label: "Meds on", class: "state-amber" },
+        { label: "complete", class: "state-green" }
+      ]
+    },
+    {
+      id: "meds",
+      name: "MEDS",
+      steps: [
+        { label: "Not started", class: "state-red" },
+        { label: "At pharm", class: "state-amber" },
+        { label: "On ward", class: "state-green" }
+      ]
+    },
+    {
+      id: "ahp",
+      name: "AHP",
+      steps: [
+        { label: "Not requested", class: "state-red" },
+        { label: "requested", class: "state-amber" },
+        { label: "confirmed", class: "state-green" }
+      ]
+    },
+    {
+      id: "poc",
+      name: "POC",
+      steps: [
+        { label: "Not request", class: "state-red" },
+        { label: "Request made", class: "state-amber" },
+        { label: "confirmed", class: "state-green" }
+      ]
+    },
+    {
+      id: "transport",
+      name: "Transport",
+      steps: [
+        { label: "unbooked", class: "state-red" },
+        { label: "Form prefilled", class: "state-amber" },
+        { label: "booked", class: "state-green" }
+      ]
+    },
+    {
+      id: "coordinator",
+      name: "Co-ordinator",
+      steps: [
+        { label: "No checks", class: "state-red" },
+        { label: "confirming", class: "state-amber" },
+        { label: "Final sign off", class: "state-green" }
+      ]
+    }
+  ];
+
+  let beds = [];
+  let pickDay = null;
+
+  function getTimeString() {
+    const now = new Date();
+    return now.toTimeString().substring(0, 5);
+  }
+
+  function pad(n) {
+    return String(n).padStart(2, "0");
+  }
+
+  function openPicker(targetDay) {
+    pickDay = targetDay;
+    document.getElementById("ptitle").textContent =
+      "Add to " + (targetDay === "today" ? "Today" : "Tomorrow");
+
+    const grid = document.getElementById("pgrid");
+    grid.innerHTML = "";
+    
+    const used = new Set(beds.map(b => Number(b.bed)));
+
+    BED_NUMBERS.forEach(n => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = n;
+      btn.disabled = used.has(n);
+      btn.addEventListener("click", () => addBed(n));
+      grid.appendChild(btn);
+    });
+
+    document.getElementById("picker").classList.add("on");
+  }
+
+  function closePicker() {
+    document.getElementById("picker").classList.remove("on");
+  }
+
+  function addBed(n) {
+    const now = getTimeString();
+    beds.push({
+      id: Date.now(),
+      targetDay: pickDay,
+      bed: Number(n),
+      tiles: DISCIPLINES.map(d => ({
+        disciplineId: d.id,
+        currentStep: 0,
+        timestamp: now,
+        ms: Date.now()
+      }))
+    });
+    closePicker();
+    render();
+  }
+
+  document.getElementById("picker").addEventListener("click", (e) => {
+    if (e.target.id === "picker") {
+      closePicker();
+    }
+  });
+
+  function cycleTile(bedId, disciplineId) {
+    const bed = beds.find(b => b.id === bedId);
+    if (!bed) return;
+
+    const tile = bed.tiles.find(t => t.disciplineId === disciplineId);
+    if (!tile) return;
+
+    tile.currentStep = (tile.currentStep + 1) % 3;
+    tile.timestamp = getTimeString();
+    tile.ms = Date.now();
+
+    render();
+  }
+
+
+
+  // Spin the bed number on the card, then let it fade out. Skipped if the screen is set to reduce motion.
+  function spinOut(btn, done) {
+    const card = btn && btn.closest(".bed-card");
+    const still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!card || still) { done(); return; }
+    card.querySelectorAll(".ask-btns button").forEach(x => x.disabled = true);
+    const num = card.querySelector(".ask-bed");
+    if (num) num.classList.add("spin");
+    card.classList.add("leaving");
+    setTimeout(done, 900);
+  }
+
+  /* ---- Mr Green walks home: plays once on "Yes, gone home" ------------------
+     Each walk picks one funny moment at random, so three discharges a day stay fresh.
+     To use the real campaign artwork, put a transparent PNG/GIF of Mr Green and his
+     dog in the repo (e.g. mrgreen.png) and set MR_GREEN_IMAGE = "mrgreen.png"
+     (the funny moments then use speech bubbles only). Nothing is saved; no sound. */
+  const MR_GREEN_IMAGE = "";
+
+  const mgPick = list => list[Math.floor(Math.random() * list.length)];
+
+  const MG_MOMENTS = [
+    // Gives the team a wave
+    async (w) => {
+      await w.pause(true);
+      await w.say(mgPick(["Cheers, team!", "Cheerio the noo!", "Ye were braw, the lot o' ye!"]));
+      w.wave(true);
+      await w.wait(1500);
+      w.wave(false);
+      await w.say(null);
+      await w.pause(false);
+    },
+    // Dog sits down and refuses to budge
+    async (w) => {
+      await w.pause(true);
+      w.dogSit(true);
+      await w.dogSay("...");
+      await w.wait(1100);
+      await w.say(mgPick(["Biscuit when we get hame?", "C'mon, ya daft dug!", "Dinnae embarrass me in front o' the nurses!"]));
+      await w.wait(1300);
+      await w.dogSay("!");
+      w.dogSit(false);
+      await w.wait(500);
+      await w.dogSay(null);
+      await w.say(null);
+      await w.pause(false);
+    },
+    // Dog gets the zoomies and hurries them both along
+    async (w) => {
+      await w.dogSay(mgPick(["Squirrel!", "Sheep!", "A COO!"]));
+      await w.say(mgPick(["Steady on!", "Haud yer horses!", "Slow doon, ya numpty!"]));
+      await w.zoom();
+      await w.dogSay(null);
+      await w.say(null);
+    },
+    // A wee jig
+    async (w) => {
+      await w.pause(true);
+      await w.say(mgPick(["Free at last!", "Pure dead brilliant!", "Braw!"]));
+      await w.jig();
+      await w.say(null);
+      await w.pause(false);
+    },
+    // Checks his watch
+    async (w) => {
+      await w.pause(true);
+      w.watch(true);
+      await w.say(mgPick(["Hame in time for the rugby!", "Just in time for the Sevens on the telly!", "Hame for ma tea!"]));
+      await w.wait(1600);
+      w.watch(false);
+      await w.say(null);
+      await w.pause(false);
+    },
+    // Dog sniffs a lamppost for far too long
+    async (w) => {
+      await w.pause(true);
+      w.post(true);
+      w.dogSniff(true);
+      await w.wait(900);
+      await w.say(mgPick(["Any time you're ready...", "Every lamppost in Gala, eh?", "Aye, take yer time, son."]));
+      await w.wait(1400);
+      w.dogSniff(false);
+      w.post(false);
+      await w.say(null);
+      await w.pause(false);
+    },
+    // Fish supper
+    async (w) => {
+      await w.pause(true);
+      await w.say("Fish supper on the way hame?");
+      await w.wait(700);
+      await w.dogSay("!!!");
+      await w.dogHop();
+      await w.dogSay(null);
+      await w.say(null);
+      await w.pause(false);
+    },
+    // Borders weather
+    async (w) => {
+      await w.pause(true);
+      w.look(true);
+      await w.say("Is that rain? In the Borders?!");
+      await w.wait(1400);
+      await w.say("Aye. Typical.");
+      await w.wait(1100);
+      w.look(false);
+      await w.say(null);
+      await w.pause(false);
+    },
+    // Common Riding season
+    async (w) => {
+      await w.pause(true);
+      await w.say(mgPick(["Common Riding's no' long noo!", "Ride the marches, son!"]));
+      await w.jig();
+      await w.say(null);
+      await w.pause(false);
+    }
+  ];
+
+  function mrGreenWalk(label) {
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    const stage = document.createElement("div");
+    stage.className = "mg-stage";
+    stage.setAttribute("aria-hidden", "true");
+
+    const house = document.createElement("div");
+    house.className = "mg-house";
+    house.innerHTML = `
+      <svg viewBox="0 0 120 110" width="120" height="110">
+        <path d="M10 52 L60 12 L110 52" fill="none" stroke="#e2e8f0" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>
+        <rect x="22" y="50" width="76" height="56" rx="3" fill="#1e293b" stroke="#e2e8f0" stroke-width="4"/>
+        <rect x="82" y="20" width="10" height="20" fill="#e2e8f0"/>
+        <rect class="mg-door" x="52" y="70" width="18" height="36" rx="2" fill="#334155"/>
+        <rect class="mg-window" x="30" y="62" width="14" height="14" rx="2" fill="#334155"/>
+        <rect class="mg-window" x="78" y="62" width="14" height="14" rx="2" fill="#334155"/>
+      </svg>`;
+
+    const walker = document.createElement("div");
+    walker.className = "mg-walker";
+    const tag = document.createElement("div");
+    tag.className = "mg-bubble mg-tag";
+    tag.textContent = label;
+    const speech = document.createElement("div");
+    speech.className = "mg-bubble mg-speech";
+    const dogSpeech = document.createElement("div");
+    dogSpeech.className = "mg-bubble mg-dogspeech";
+    walker.append(tag, speech, dogSpeech);
+
+    const post = document.createElement("div");
+    post.className = "mg-post";
+    post.innerHTML = `<svg viewBox="0 0 30 150" width="36" height="180">
+        <rect x="12" y="20" width="6" height="128" rx="2" fill="#64748b"/>
+        <path d="M6 22 Q15 6 24 22 Z" fill="#94a3b8"/><circle cx="15" cy="23" r="4" fill="#fde68a"/>
+      </svg>`;
+
+    if (MR_GREEN_IMAGE) {
+      const img = document.createElement("img");
+      img.src = MR_GREEN_IMAGE;
+      img.alt = "";
+      img.className = "mg-img";
+      walker.appendChild(img);
+    } else {
+      const K = "#111111", W = "#fdfdfc", G = "#c9c9c7";
+      walker.insertAdjacentHTML("beforeend", `
+        <svg class="mg-figure" viewBox="0 0 240 172" width="288" height="206">
+          <path class="mg-lead" d="M110 102 Q160 128 206 112" fill="none" stroke="#94a3b8" stroke-width="2"/>
+          <g class="mg-man">
+            <!-- legs -->
+            <g class="mg-leg mg-leg-a"><line x1="63" y1="118" x2="62" y2="164" stroke="${K}" stroke-width="4.5" stroke-linecap="round"/></g>
+            <g class="mg-leg mg-leg-b"><line x1="81" y1="118" x2="82" y2="164" stroke="${K}" stroke-width="4.5" stroke-linecap="round"/></g>
+            <!-- free arm (waves / checks watch) -->
+            <g class="mg-arm-back">
+              <path d="M54 72 L42 96 Q34 98 31 104" fill="none" stroke="${K}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+              <g class="mg-watch"><rect x="38" y="94" width="9" height="7" rx="2" fill="#fbbf24" stroke="${K}" stroke-width="1.5"/></g>
+            </g>
+            <!-- body: green tube with a darker side -->
+            <path d="M56 60 Q51 84 51 104 L51 116 Q72 124 93 116 L93 100 Q92 78 87 60 Z" fill="#6db54c" stroke="${K}" stroke-width="4" stroke-linejoin="round"/>
+            <path d="M83 62 Q89 82 89 100 L89 117 L93 116 L93 100 Q92 78 87 60 Z" fill="#578f3d"/>
+            <!-- stick arm and crook walking stick -->
+            <path d="M88 66 Q98 84 103 100 L108 100" fill="none" stroke="${K}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+            <path class="mg-stick" d="M104 102 Q107 95 113 97 Q117 99 116 105 L116 162" fill="none" stroke="${K}" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <!-- head -->
+            <g class="mg-head">
+              <ellipse cx="51" cy="36" rx="5" ry="15" fill="${G}" stroke="${K}" stroke-width="3.5"/>
+              <ellipse cx="93" cy="36" rx="5" ry="15" fill="${G}" stroke="${K}" stroke-width="3.5"/>
+              <circle cx="51" cy="44" r="4.5" fill="${G}" stroke="${K}" stroke-width="3"/>
+              <circle cx="93" cy="44" r="4.5" fill="${G}" stroke="${K}" stroke-width="3"/>
+              <ellipse cx="72" cy="33" rx="21" ry="27" fill="${W}" stroke="${K}" stroke-width="4"/>
+              <path d="M80 10 Q91 20 91 36 Q90 50 84 58 Q88 44 87 32 Q86 18 80 10 Z" fill="${G}"/>
+              <path d="M66 16 Q71 15 75 16 M65 20 Q69 19 73 20" fill="none" stroke="${G}" stroke-width="1.6" stroke-linecap="round"/>
+              <circle cx="64" cy="35" r="2.2" fill="${K}"/>
+              <circle cx="81" cy="35" r="2.2" fill="${K}"/>
+              <path d="M61 31 Q64 26 69 28 Q72 31 70 37 Q67 44 70 47 Q74 49 76 44" fill="none" stroke="${K}" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M67 53 Q73 56 80 53" fill="none" stroke="${K}" stroke-width="3" stroke-linecap="round"/>
+            </g>
+          </g>
+          <g class="mg-dog">
+            <!-- back legs and tail (lower when sitting) -->
+            <g class="mg-dog-rear">
+              <path class="mg-tail" d="M163 124 Q152 106 160 96 Q160 106 168 118" fill="${W}" stroke="${K}" stroke-width="3.5" stroke-linejoin="round"/>
+              <g class="mg-dleg mg-dleg-a"><path d="M166 134 L163 162 L170 160 L174 134" fill="${W}" stroke="${K}" stroke-width="3.5" stroke-linejoin="round"/></g>
+              <g class="mg-dleg mg-dleg-b"><path d="M176 134 L176 162 L182 162 L184 134" fill="${G}" stroke="${K}" stroke-width="3.5" stroke-linejoin="round"/></g>
+            </g>
+            <g class="mg-dleg mg-dleg-b"><path d="M196 134 L194 162 L200 162 L203 134" fill="${G}" stroke="${K}" stroke-width="3.5" stroke-linejoin="round"/></g>
+            <g class="mg-dleg mg-dleg-a"><path d="M205 134 L208 162 L214 160 L212 134" fill="${W}" stroke="${K}" stroke-width="3.5" stroke-linejoin="round"/></g>
+            <g class="mg-dog-body">
+              <path d="M162 138 Q160 118 172 114 L202 112 Q214 112 214 124 L214 138 Q188 142 162 138 Z" fill="${W}" stroke="${K}" stroke-width="3.5" stroke-linejoin="round"/>
+              <path d="M174 114 Q176 124 184 124 Q192 124 193 113 Z" fill="${K}"/>
+              <g class="mg-dog-head">
+                <path d="M200 116 Q196 104 202 96 L210 94 L232 104 Q222 112 214 118 Q206 121 200 116 Z" fill="${W}" stroke="${K}" stroke-width="3.5" stroke-linejoin="round"/>
+                <path d="M201 98 L195 80 L208 94 Z" fill="${W}" stroke="${K}" stroke-width="3.2" stroke-linejoin="round"/>
+                <path d="M209 95 L216 79 L218 98 Z" fill="${W}" stroke="${K}" stroke-width="3.2" stroke-linejoin="round"/>
+                <path d="M226 101 L233 104 L227 108 Z" fill="${K}" stroke="${K}" stroke-width="2" stroke-linejoin="round"/>
+                <circle cx="211" cy="101" r="2" fill="${K}"/>
+                <path d="M215 110 Q219 113 223 110" fill="none" stroke="${K}" stroke-width="2.5" stroke-linecap="round"/>
+              </g>
+            </g>
+          </g>
+        </svg>`);
+    }
+
+    stage.append(house, post, walker);
+    document.body.appendChild(stage);
+
+    // ---- little helpers the funny moments use ----
+    let x = -240;
+    const endX = Math.max(0, window.innerWidth - 120 - 24 - 220);
+    const speed = (endX + 240) / 7000; // px per ms at a normal stroll
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const bubble = async (el, text) => {
+      if (text) { el.textContent = text; el.classList.add("on"); }
+      else el.classList.remove("on");
+      await wait(text ? 250 : 150);
+    };
+    const walkTo = (to, rate = 1) => {
+      const ms = Math.abs(to - x) / (speed * rate);
+      const a = walker.animate([{ transform: `translateX(${x}px)` }, { transform: `translateX(${to}px)` }],
+        { duration: ms, easing: "linear", fill: "forwards" });
+      x = to;
+      return a.finished;
+    };
+    const w = {
+      wait,
+      say: t => bubble(speech, t),
+      dogSay: t => bubble(dogSpeech, t),
+      pause: async on => { walker.classList.toggle("mg-paused", on); await wait(on ? 150 : 0); },
+      wave: on => walker.classList.toggle("mg-waving", on),
+      watch: on => walker.classList.toggle("mg-watching", on),
+      dogSit: on => walker.classList.toggle("mg-sit", on),
+      dogSniff: on => walker.classList.toggle("mg-sniff", on),
+      post: on => {
+        if (on) { post.style.transform = `translateX(${x + 286}px)`; post.classList.add("on"); }
+        else post.classList.remove("on");
+      },
+      look: on => walker.classList.toggle("mg-looking", on),
+      dogHop: async () => {
+        walker.classList.add("mg-doghop");
+        await wait(1300);
+        walker.classList.remove("mg-doghop");
+      },
+      jig: async () => {
+        walker.classList.add("mg-jig");
+        await wait(1400);
+        walker.classList.remove("mg-jig");
+      },
+      zoom: async () => {
+        walker.classList.add("mg-zoomies");
+        await walkTo(Math.min(endX, x + 260), 3.2);
+        walker.classList.remove("mg-zoomies");
+      }
+    };
+
+    (async () => {
+      const mid = Math.round(endX * (0.35 + Math.random() * 0.2));
+      await walkTo(mid);
+      const moment = MG_MOMENTS[Math.floor(Math.random() * MG_MOMENTS.length)];
+      await moment(w);
+      await walkTo(endX);
+      walker.classList.add("mg-paused");
+      await w.dogSay(mgPick(["Woof!", "Hame!", "Woof! Woof!"]));
+      house.classList.add("lit");
+      await wait(900);
+      await w.dogSay(null);
+      walker.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 500, fill: "forwards" });
+      await wait(1600);
+      await stage.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 800, fill: "forwards" }).finished;
+      stage.remove();
+    })().catch(() => stage.remove());
+  }
+
+  // ---- Today's tally (header). Resets at midnight or on reload. Nothing is saved. ----
+  let dayCounts = { home: 0, ward: 0, failed: 0 };
+  let countDay = new Date().toDateString();
+  function showCount(key) {
+    const el = document.getElementById("dc-" + key);
+    if (el) el.querySelector("b").textContent = dayCounts[key];
+  }
+  function rollDay() {
+    const d = new Date().toDateString();
+    if (d === countDay) return;
+    countDay = d;
+    Object.keys(dayCounts).forEach(k => { dayCounts[k] = 0; showCount(k); });
+  }
+  function bumpCount(key) {
+    rollDay();
+    dayCounts[key]++;
+    showCount(key);
+    const el = document.getElementById("dc-" + key);
+    if (el) { el.classList.remove("bump"); void el.offsetWidth; el.classList.add("bump"); }
+  }
+  setInterval(rollDay, 60000);
+
+  // ---- Tap a count to correct it (+ and - only). A central pop-up that closes itself. ----
+  const countEdit = document.createElement("div");
+  countEdit.className = "dc-modal";
+  countEdit.setAttribute("role", "dialog");
+  countEdit.setAttribute("aria-modal", "true");
+  countEdit.innerHTML = '<div class="dc-panel">' +
+    '<div class="dc-edit-label"></div>' +
+    '<div class="dc-edit-row"><button type="button" data-d="-1" aria-label="One less">&minus;</button>' +
+    '<span class="dc-edit-val">0</span>' +
+    '<button type="button" data-d="1" aria-label="One more">+</button></div>' +
+    '<button type="button" class="dc-done">Done</button>' +
+    '<div class="dc-hint">Closes by itself a moment after you change it</div></div>';
+  document.body.appendChild(countEdit);
+  let editKey = null, editTimer;
+  function closeCountEdit() { countEdit.classList.remove("on"); editKey = null; clearTimeout(editTimer); }
+  function openCountEdit(key, chip) {
+    editKey = key;
+    countEdit.querySelector(".dc-edit-label").textContent = "Correct: " + chip.firstChild.textContent.trim();
+    countEdit.querySelector(".dc-edit-val").textContent = dayCounts[key];
+    countEdit.classList.add("on");
+    clearTimeout(editTimer);
+    editTimer = setTimeout(closeCountEdit, 8000);   // nobody touched it: tidy away
+  }
+  countEdit.addEventListener("click", e => {
+    if (e.target === countEdit) { closeCountEdit(); return; }   // tapped the dark background
+    const btn = e.target.closest("button");
+    if (!btn || editKey === null) return;
+    if (btn.classList.contains("dc-done")) { closeCountEdit(); return; }
+    rollDay();
+    dayCounts[editKey] = Math.max(0, dayCounts[editKey] + Number(btn.dataset.d));
+    showCount(editKey);
+    countEdit.querySelector(".dc-edit-val").textContent = dayCounts[editKey];
+    clearTimeout(editTimer);
+    editTimer = setTimeout(closeCountEdit, 1500);   // closes shortly after the last change
+  });
+  document.querySelectorAll(".dc").forEach(chip => {
+    chip.addEventListener("click", () => openCountEdit(chip.id.replace("dc-", ""), chip));
+  });
+
+  // Answer to "Discharge successful?" on a Today card
+  function answerGone(bedId, answer, btn) {
+    const bed = beds.find(b => b.id === bedId);
+    if (!bed) return;
+    if (answer === "yes") {
+      beds = beds.filter(b => b.id !== bedId);
+      bumpCount("home");
+      spinOut(btn, () => {
+        render();
+        mrGreenWalk("Bed " + pad(bed.bed) + " \u00b7 Home!");
+      });
+      return;
+    }
+    // Didn't happen: co-ordinator sign-off has to be done again, and it moves to tomorrow.
+    const coord = bed.tiles.find(t => t.disciplineId === "coordinator");
+    if (coord) { coord.currentStep = 0; coord.timestamp = getTimeString(); coord.ms = Date.now(); }
+    bed.targetDay = "tomorrow";
+    bumpCount("failed");
+    render();
+  }
+
+  function toggleDay(bedId) {
+    const bed = beds.find(b => b.id === bedId);
+    if (!bed) return;
+    bed.targetDay = bed.targetDay === "today" ? "tomorrow" : "today";
+    render();
+  }
+
+  function removeBed(bedId) {
+    beds = beds.filter(b => b.id !== bedId);
+    render();
+  }
+
+  function renderColumn(targetDay, containerId, countId) {
+    const container = document.getElementById(containerId);
+    container.innerHTML = "";
+
+    // Filter beds for the column and sort them numerically by bed number
+    const dayBeds = beds
+      .filter(b => b.targetDay === targetDay)
+      .sort((a, b) => Number(a.bed) - Number(b.bed));
+
+    document.getElementById(countId).innerText = dayBeds.length;
+
+    dayBeds.forEach(bed => {
+      const card = document.createElement("div");
+      card.className = "bed-card";
+
+      const allGreen = bed.tiles.every(t => t.currentStep === 2);
+      const asking = allGreen && targetDay === "today";
+      if (allGreen && !asking) {
+        card.classList.add("completed-dim");
+      }
+
+      const shiftTargetText = targetDay === "today" ? "Move &rarr; Tomorrow" : "&larr; Move to Today";
+
+      card.innerHTML = `
+        <div class="bed-top-row">
+          <button type="button" class="btn-action btn-move" onclick="toggleDay(${bed.id})">${shiftTargetText}</button>
+          <button type="button" class="btn-action btn-delete" onclick="removeBed(${bed.id})">&times;</button>
+        </div>
+        <div class="bed-main-content">
+          <span class="bed-badge">${pad(bed.bed)}</span>
+          <div class="tile-container" id="tiles-${bed.id}"></div>
+        </div>
+      `;
+
+      const tileContainer = card.querySelector('.tile-container');
+
+      bed.tiles.forEach(tileState => {
+        const config = DISCIPLINES.find(d => d.id === tileState.disciplineId);
+        const step = config.steps[tileState.currentStep];
+
+        const tile = document.createElement("div");
+        tile.className = `tile ${step.class}`;
+        tile.dataset.ms = tileState.ms;
+        tile.dataset.urgent = targetDay === "today" ? "1" : "0";
+        if (tileState.currentStep === 0 && targetDay === "today" && Date.now() - tileState.ms >= STALE_MINUTES * 60000) {
+          tile.classList.add("stale");
+        }
+        tile.onclick = () => cycleTile(bed.id, config.id);
+
+        tile.innerHTML = `
+          <div class="tile-title">${config.name}</div>
+          <div class="tile-subtitle">${step.label}</div>
+          <div class="tile-time">${tileState.timestamp}</div>
+        `;
+
+        tileContainer.appendChild(tile);
+      });
+
+      if (asking) {
+        const panel = document.createElement("div");
+        panel.className = "ask-panel";
+        panel.setAttribute("role", "group");
+        panel.setAttribute("aria-label", "Bed " + bed.bed + ": discharge successful?");
+        panel.innerHTML = `
+          <div class="ask-head">
+            <div class="ask-bed">${pad(bed.bed)}</div>
+            <div class="ask-q">Discharge successful?</div>
+          </div>
+          <div class="ask-btns">
+            <button type="button" class="c-yes" onclick="answerGone(${bed.id}, 'yes', this)">Yes, gone home<small>Clears the bed</small></button>
+            <button type="button" class="c-no" onclick="answerGone(${bed.id}, 'no', this)">Didn't happen<small>Moves to tomorrow</small></button>
+          </div>
+        `;
+        card.appendChild(panel);
+      }
+
+      container.appendChild(card);
+    });
+  }
+
+  function render() {
+    renderColumn("today", "listToday", "countToday");
+    renderColumn("tomorrow", "listTomorrow", "countTomorrow");
+  }
+
+  setInterval(() => {
+    document.getElementById("clock").innerText = getTimeString();
+  }, 1000);
+
+  // Stuck reds: checked every 30 seconds without redrawing the board
+  setInterval(() => {
+    const limit = Date.now() - STALE_MINUTES * 60000;
+    document.querySelectorAll(".tile.state-red").forEach(el => {
+      el.classList.toggle("stale", el.dataset.urgent === "1" && Number(el.dataset.ms) <= limit);
+    });
+  }, 30000);
+
+  render();
+</script>
+</body>
+</html>
